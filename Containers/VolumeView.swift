@@ -2,12 +2,13 @@
 //  VolumeView.swift
 //  Containers
 //
-//  Created on 03/13/25.
+//  Created on 13/03/25.
 //
 
 import SwiftUI
 
 struct VolumeView: View {
+    @EnvironmentObject private var dockerSettings: DockerSettings
     @State private var volumes: [Volume] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -16,9 +17,7 @@ struct VolumeView: View {
     @State private var showingActionSheet = false
     @State private var showingCreateSheet = false
     @State private var newVolumeName = ""
-    
-    private let dockerClient = DockerClient()
-    
+
     var body: some View {
         VStack {
             if isLoading {
@@ -72,42 +71,42 @@ struct VolumeView: View {
             Text(errorMessage ?? "An unknown error occurred")
         }
         .task {
-            await refreshVolumes()
+            await loadVolumes()
         }
     }
-    
+
     private func refreshVolumes() {
         Task {
             await loadVolumes()
         }
     }
-    
+
     private func loadVolumes() async {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            volumes = try await dockerClient.listVolumes()
+            volumes = try await dockerSettings.dockerClient.listVolumes()
         } catch {
             errorMessage = "Failed to load volumes: \(error.localizedDescription)"
             showError = true
         }
-        
+
         isLoading = false
     }
-    
+
     private enum VolumeAction {
         case remove
     }
-    
+
     private func performVolumeAction(volume: Volume, action: VolumeAction) {
         Task {
             do {
                 switch action {
                 case .remove:
-                    try await dockerClient.removeVolume(name: volume.name)
+                    try await dockerSettings.dockerClient.removeVolume(name: volume.name)
                 }
-                
+
                 // Refresh volume list after action
                 await loadVolumes()
             } catch {
@@ -116,13 +115,13 @@ struct VolumeView: View {
             }
         }
     }
-    
+
     private func createVolume() {
         guard !newVolumeName.isEmpty else { return }
-        
+
         Task {
             do {
-                try await dockerClient.createVolume(name: newVolumeName)
+                try await dockerSettings.dockerClient.createVolume(name: newVolumeName)
                 newVolumeName = ""
                 showingCreateSheet = false
                 await loadVolumes()
@@ -136,25 +135,29 @@ struct VolumeView: View {
 
 struct VolumeRow: View {
     let volume: Volume
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(volume.name)
-                .font(.headline)
-            
-            HStack(spacing: 16) {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(volume.name)
+                    .font(.headline)
+
                 Label(volume.driver, systemImage: "gearshape")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                
-                if let created = volume.createdAt {
-                    Label(formatDate(created), systemImage: "calendar")
-                        .font(.caption)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing) {
+                if let size = volume.usageData?.size {
+                    Text(formatSize(size))
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                
-                if let size = volume.usageData?.size {
-                    Label(formatSize(size), systemImage: "archivebox")
+
+                if let created = volume.createdAt {
+                    Text(formatDate(created))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -162,23 +165,23 @@ struct VolumeRow: View {
         }
         .padding(.vertical, 4)
     }
-    
+
     private func formatSize(_ size: Int) -> String {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: Int64(size))
     }
-    
+
     private func formatDate(_ dateString: String) -> String {
         // Docker returns dates in RFC3339 format
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        
+
         guard let date = formatter.date(from: dateString) else {
             return dateString
         }
-        
+
         let relativeFormatter = RelativeDateTimeFormatter()
         relativeFormatter.unitsStyle = .abbreviated
         return relativeFormatter.localizedString(for: date, relativeTo: Date())
@@ -189,7 +192,7 @@ struct CreateVolumeSheet: View {
     @Binding var volumeName: String
     @Environment(\.dismiss) private var dismiss
     var onSubmit: () -> Void
-    
+
     var body: some View {
         NavigationStack {
             Form {
@@ -197,7 +200,7 @@ struct CreateVolumeSheet: View {
                     TextField("Name", text: $volumeName)
                         .autocorrectionDisabled()
                 }
-                
+
                 Section(footer: Text("Only local driver is currently supported")) {
                     Text("Driver: local")
                         .foregroundStyle(.secondary)
@@ -210,7 +213,7 @@ struct CreateVolumeSheet: View {
                         dismiss()
                     }
                 }
-                
+
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") {
                         onSubmit()
@@ -225,4 +228,5 @@ struct CreateVolumeSheet: View {
 
 #Preview {
     VolumeView()
+        .environmentObject(DockerSettings())
 }

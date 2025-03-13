@@ -2,12 +2,13 @@
 //  ImageView.swift
 //  Containers
 //
-//  Created on 03/13/25.
+//  Created on 13/03/25.
 //
 
 import SwiftUI
 
 struct ImageView: View {
+    @EnvironmentObject private var dockerSettings: DockerSettings
     @State private var images: [Image] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -16,9 +17,7 @@ struct ImageView: View {
     @State private var showingActionSheet = false
     @State private var showingPullSheet = false
     @State private var imageToPull = ""
-    
-    private let dockerClient = DockerClient()
-    
+
     var body: some View {
         VStack {
             if isLoading {
@@ -62,7 +61,7 @@ struct ImageView: View {
             Button("Create Container", action: {
                 // This would navigate to container creation with this image pre-selected
             })
-            
+
             Button("Remove", role: .destructive) {
                 performImageAction(image: image, action: .remove)
             }
@@ -76,42 +75,42 @@ struct ImageView: View {
             Text(errorMessage ?? "An unknown error occurred")
         }
         .task {
-            await refreshImages()
+            await loadImages()
         }
     }
-    
+
     private func refreshImages() {
         Task {
             await loadImages()
         }
     }
-    
+
     private func loadImages() async {
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            images = try await dockerClient.listImages()
+            images = try await dockerSettings.dockerClient.listImages()
         } catch {
             errorMessage = "Failed to load images: \(error.localizedDescription)"
             showError = true
         }
-        
+
         isLoading = false
     }
-    
+
     private enum ImageAction {
         case remove
     }
-    
+
     private func performImageAction(image: Image, action: ImageAction) {
         Task {
             do {
                 switch action {
                 case .remove:
-                    try await dockerClient.removeImage(id: image.id)
+                    try await dockerSettings.dockerClient.removeImage(id: image.id)
                 }
-                
+
                 // Refresh image list after action
                 await loadImages()
             } catch {
@@ -120,14 +119,14 @@ struct ImageView: View {
             }
         }
     }
-    
+
     private func pullImage() {
         guard !imageToPull.isEmpty else { return }
-        
+
         Task {
             do {
                 isLoading = true
-                try await dockerClient.pullImage(name: imageToPull)
+                try await dockerSettings.dockerClient.pullImage(name: imageToPull)
                 imageToPull = ""
                 showingPullSheet = false
                 await loadImages()
@@ -142,25 +141,25 @@ struct ImageView: View {
 
 struct ImageRow: View {
     let image: Image
-    
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(image.displayName)
                     .font(.headline)
-                
+
                 Text(image.shortId)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            
+
             Spacer()
-            
+
             VStack(alignment: .trailing) {
                 Text(formatSize(image.size))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                
+
                 Text(formatDate(image.created))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -168,14 +167,14 @@ struct ImageRow: View {
         }
         .padding(.vertical, 4)
     }
-    
+
     private func formatSize(_ size: Int) -> String {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: Int64(size))
     }
-    
+
     private func formatDate(_ timestamp: Int) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
         let formatter = RelativeDateTimeFormatter()
@@ -188,7 +187,7 @@ struct PullImageSheet: View {
     @Binding var imageName: String
     @Environment(\.dismiss) private var dismiss
     var onSubmit: () -> Void
-    
+
     var body: some View {
         NavigationStack {
             Form {
@@ -196,7 +195,7 @@ struct PullImageSheet: View {
                     TextField("Image name (e.g. ubuntu:latest)", text: $imageName)
                         .autocorrectionDisabled()
                 }
-                
+
                 Section(header: Text("Examples"), footer: Text("Docker Hub will be used if no registry is specified")) {
                     Button("ubuntu:latest") {
                         imageName = "ubuntu:latest"
@@ -216,7 +215,7 @@ struct PullImageSheet: View {
                         dismiss()
                     }
                 }
-                
+
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Pull") {
                         onSubmit()
@@ -231,4 +230,5 @@ struct PullImageSheet: View {
 
 #Preview {
     ImageView()
+        .environmentObject(DockerSettings())
 }

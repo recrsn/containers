@@ -10,27 +10,28 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
     @State private var selectedSection: Section? = .containers
-    
+
     enum Section: String, Identifiable, CaseIterable {
         case containers = "Containers"
         case images = "Images"
         case volumes = "Volumes"
-        
+        case networks = "Networks"
+
         var id: String { self.rawValue }
-        
+
         var iconName: String {
             switch self {
             case .containers: return "square.stack.3d.up"
             case .images: return "cube"
             case .volumes: return "folder"
+            case .networks: return "network"
             }
         }
     }
-    
+
     @EnvironmentObject private var dockerSettings: DockerSettings
-    
+
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedSection) {
@@ -53,6 +54,9 @@ struct ContentView: View {
                 case .volumes:
                     VolumeView()
                         .navigationTitle("Volumes")
+                case .networks:
+                    NetworkView()
+                        .navigationTitle("Networks")
                 }
             } else {
                 ContentUnavailableView(
@@ -68,6 +72,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
         .environmentObject(DockerSettings())
 }

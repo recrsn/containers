@@ -10,13 +10,21 @@ import SwiftUI
 struct DockerSocket: Identifiable, Hashable {
     var id: String { path }
     let name: String
-    let path: String
+    var path: String
     let description: String
-    
+    let isCustom: Bool
+
+    init(name: String, path: String, description: String, isCustom: Bool = false) {
+        self.name = name
+        self.path = path
+        self.description = description
+        self.isCustom = isCustom
+    }
+
     static func == (lhs: DockerSocket, rhs: DockerSocket) -> Bool {
         return lhs.path == rhs.path
     }
-    
+
     func hash(into hasher: inout Hasher) {
         hasher.combine(path)
     }
@@ -29,9 +37,10 @@ class DockerSettings: ObservableObject {
             dockerClient = DockerClient(socketPath: socketPath)
         }
     }
-    
+
     @Published var dockerClient: DockerClient
-    
+    @Published var customSocket: DockerSocket
+
     static let predefinedSockets: [DockerSocket] = [
         DockerSocket(
             name: "Docker Desktop",
@@ -47,16 +56,28 @@ class DockerSettings: ObservableObject {
             name: "Podman",
             path: "~/.local/share/containers/podman/machine/podman-machine-default/podman.sock",
             description: "Default Podman machine socket path"
+        ),
+        DockerSocket(
+            name: "Custom",
+            path: "",
+            description: "Specify a custom Docker socket path",
+            isCustom: true
         )
     ]
-    
+
     init() {
         // Load saved socket path or use default
         let socketPath = UserDefaults.standard.string(forKey: "dockerSocketPath") ?? "/var/run/docker.sock"
         self.socketPath = socketPath
         self.dockerClient = DockerClient(socketPath: socketPath)
+        self.customSocket = DockerSocket(
+            name: "Custom",
+            path: socketPath,
+            description: "Custom Docker socket path",
+            isCustom: true
+        )
     }
-    
+
     // Resolve path with tilde expansion
     func resolvePath(_ path: String) -> String {
         if path.hasPrefix("~") {
@@ -71,144 +92,112 @@ struct DockerSettingsView: View {
     @EnvironmentObject private var settings: DockerSettings
     @State private var customPath: String = ""
     @State private var selectedSocket: DockerSocket?
-    @State private var isCustomPath = false
     @State private var testConnectionResult: String?
     @State private var isTestingConnection = false
-    
+
     var body: some View {
-        TabView {
-            Form {
-                Section {
-                    Picker("Socket Configuration", selection: $isCustomPath) {
-                        Text("Predefined").tag(false)
-                        Text("Custom").tag(true)
+        Form {
+            Section {
+                Picker("Select Docker Installation", selection: $selectedSocket) {
+                    ForEach(DockerSettings.predefinedSockets) { socket in
+                        Text(socket.name).tag(Optional(socket))
                     }
-                    .pickerStyle(.segmented)
-                    
-                    if isCustomPath {
-                        TextField("Custom Socket Path", text: $customPath)
-                            .onSubmit {
-                                if !customPath.isEmpty {
-                                    settings.socketPath = settings.resolvePath(customPath)
-                                }
-                            }
-                        
-                        Button("Apply Custom Path") {
-                            if !customPath.isEmpty {
-                                settings.socketPath = settings.resolvePath(customPath)
-                                testConnection()
-                            }
-                        }
-                        .disabled(customPath.isEmpty)
-                    } else {
-                        Picker("Select Docker Installation", selection: $selectedSocket) {
-                            ForEach(DockerSettings.predefinedSockets) { socket in
-                                Text(socket.name).tag(Optional(socket))
-                            }
-                        }
-                        .onChange(of: selectedSocket) { newValue in
-                            if let socket = newValue {
-                                let resolvedPath = settings.resolvePath(socket.path)
-                                settings.socketPath = resolvedPath
-                                customPath = resolvedPath
-                                testConnection()
-                            }
-                        }
-                        
-                        if let selectedSocket = selectedSocket {
-                            Text(selectedSocket.description)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                }
+                .onChange(of: selectedSocket) { newValue in
+                    if let socket = newValue {
+                        if socket.isCustom {
+                            // For custom option, just update the UI elements
+                            customPath = settings.customSocket.path
+                        } else {
+                            // For predefined options, apply the path immediately
+                            let resolvedPath = settings.resolvePath(socket.path)
+                            settings.socketPath = resolvedPath
+                            customPath = resolvedPath
+                            testConnection()
                         }
                     }
-                    
-                    Text("Current Socket Path: \(settings.socketPath)")
+                }
+
+                if let socket = selectedSocket, !socket.isCustom {
+                    Text(socket.description)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                } header: {
-                    Text("Docker Socket Connection")
                 }
-                
-                Section {
-                    Button(action: testConnection) {
-                        HStack {
-                            Text("Test Connection")
-                            if isTestingConnection {
-                                Spacer()
-                                ProgressView()
-                                    .controlSize(.small)
+
+                if let socket = selectedSocket, socket.isCustom {
+                    TextField("Custom Socket Path", text: $customPath)
+                        .onSubmit {
+                            if !customPath.isEmpty {
+                                let resolvedPath = settings.resolvePath(customPath)
+                                settings.socketPath = resolvedPath
+                                settings.customSocket.path = customPath
                             }
                         }
-                    }
-                    .disabled(isTestingConnection)
-                    
-                    if let result = testConnectionResult {
-                        Text(result)
-                            .foregroundColor(result.contains("Connected") ? .green : .red)
-                    }
-                }
-            }
-            .tabItem {
-                Label("Connection", systemImage: "network")
-            }
-            .onAppear {
-                // Set initial values
-                customPath = settings.socketPath
-                
-                // Find if the current path matches any predefined socket
-                if let match = DockerSettings.predefinedSockets.first(where: { 
-                    settings.resolvePath($0.path) == settings.socketPath 
-                }) {
-                    selectedSocket = match
-                    isCustomPath = false
-                } else {
-                    isCustomPath = true
-                }
-            }
-            
-            Form {
-                Text("Docker Socket Information")
-                    .font(.headline)
-                    .padding(.bottom, 5)
-                
-                Text("Configure the connection to your Docker daemon by selecting a predefined socket path or specifying a custom path.")
-                
-                Divider()
-                    .padding(.vertical)
-                
-                Text("Predefined Options:")
-                    .font(.headline)
-                    .padding(.bottom, 5)
-                
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(DockerSettings.predefinedSockets) { socket in
-                        VStack(alignment: .leading) {
-                            Text(socket.name)
-                                .font(.subheadline)
-                                .bold()
-                            Text(socket.path)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text(socket.description)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+
+                    Button("Apply Custom Path") {
+                        if !customPath.isEmpty {
+                            let resolvedPath = settings.resolvePath(customPath)
+                            settings.socketPath = resolvedPath
+                            settings.customSocket.path = customPath
+                            testConnection()
                         }
-                        .padding(.bottom, 5)
+                    }
+                    .disabled(customPath.isEmpty)
+
+                    Text(socket.description)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Text("Current Socket Path: \(settings.socketPath)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } header: {
+                Text("Docker Socket Connection")
+            }
+
+            Section {
+                Button(action: testConnection) {
+                    HStack {
+                        Text("Test Connection")
+                        if isTestingConnection {
+                            Spacer()
+                            ProgressView()
+                                .controlSize(.small)
+                        }
                     }
                 }
-            }
-            .tabItem {
-                Label("About", systemImage: "info.circle")
+                .disabled(isTestingConnection)
+
+                if let result = testConnectionResult {
+                    Text(result)
+                        .foregroundColor(result.contains("Connected") ? .green : .red)
+                }
             }
         }
         .padding()
         .frame(width: 500)
+        .onAppear {
+            // Set initial values
+            customPath = settings.socketPath
+
+            // Find if the current path matches any predefined socket
+            if let match = DockerSettings.predefinedSockets.filter({ !$0.isCustom }).first(where: {
+                settings.resolvePath($0.path) == settings.socketPath
+            }) {
+                selectedSocket = match
+            } else {
+                // Use custom socket
+                settings.customSocket.path = settings.socketPath
+                selectedSocket = DockerSettings.predefinedSockets.last // The custom option
+            }
+        }
     }
-    
+
     private func testConnection() {
         isTestingConnection = true
         testConnectionResult = nil
-        
+
         Task {
             do {
                 // Try to get a list of containers as a test
