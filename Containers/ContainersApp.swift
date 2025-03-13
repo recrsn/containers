@@ -10,6 +10,8 @@ import SwiftData
 
 @main
 struct ContainersApp: App {
+    @StateObject private var dockerSettings = DockerSettings()
+    
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Item.self,
@@ -26,7 +28,13 @@ struct ContainersApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(dockerSettings)
         }
         .modelContainer(sharedModelContainer)
+        
+        Settings {
+            DockerSettingsView()
+                .environmentObject(dockerSettings)
+        }
     }
 }

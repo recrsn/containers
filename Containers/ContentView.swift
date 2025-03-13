@@ -11,51 +11,63 @@ import SwiftData
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var items: [Item]
-
+    @State private var selectedSection: Section? = .containers
+    
+    enum Section: String, Identifiable, CaseIterable {
+        case containers = "Containers"
+        case images = "Images"
+        case volumes = "Volumes"
+        
+        var id: String { self.rawValue }
+        
+        var iconName: String {
+            switch self {
+            case .containers: return "square.stack.3d.up"
+            case .images: return "cube"
+            case .volumes: return "folder"
+            }
+        }
+    }
+    
+    @EnvironmentObject private var dockerSettings: DockerSettings
+    
     var body: some View {
         NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+            List(selection: $selectedSection) {
+                ForEach(Section.allCases) { section in
+                    NavigationLink(value: section) {
+                        Label(section.rawValue, systemImage: section.iconName)
                     }
                 }
             }
+            .navigationTitle("Containers")
         } detail: {
-            Text("Select an item")
-        }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+            if let selectedSection {
+                switch selectedSection {
+                case .containers:
+                    ContainerView()
+                        .navigationTitle("Containers")
+                case .images:
+                    ImageView()
+                        .navigationTitle("Images")
+                case .volumes:
+                    VolumeView()
+                        .navigationTitle("Volumes")
+                }
+            } else {
+                ContentUnavailableView(
+                    "No Selection",
+                    systemImage: "square.dashed",
+                    description: Text("Select a section from the sidebar to get started.")
+                )
             }
         }
+        .environmentObject(dockerSettings)
     }
 }
 
 #Preview {
     ContentView()
         .modelContainer(for: Item.self, inMemory: true)
+        .environmentObject(DockerSettings())
 }
