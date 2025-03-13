@@ -2,8 +2,7 @@
 
 A native macOS application for managing containers across multiple runtimes.
 
-Containers provides a sleek, native macOS interface for managing container
-workloads across various container runtimes:
+## Supported Runtimes
 
 - Docker Desktop
 - Podman
