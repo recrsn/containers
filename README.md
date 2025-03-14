@@ -1,5 +1,6 @@
 # Containers
 
+![Containers logo](assets/icon_64.png)
 A native macOS application for managing containers across multiple runtimes.
 
 ## Supported Runtimes
