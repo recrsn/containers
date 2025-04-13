@@ -9,7 +9,7 @@ import Foundation
 
 // MARK: - Image Models
 
-struct Image: Codable, Identifiable {
+struct ContainerImage: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let parentId: String
     let repoTags: [String]?
@@ -40,7 +40,8 @@ struct Image: Codable, Identifiable {
     }
 
     var shortId: String {
-        return id.hasPrefix("sha256:") ? String(id.dropFirst(7).prefix(12)) : id.prefix(12).description
+        return id.hasPrefix("sha256:")
+            ? String(id.dropFirst(7).prefix(12)) : id.prefix(12).description
     }
 }
 
@@ -50,7 +51,7 @@ extension DockerClient {
     /// List all images
     /// - Parameter all: Include intermediate images if true
     /// - Returns: List of images
-    public func listImages(all: Bool = false) async throws -> [Image] {
+    public func listImages(all: Bool = false) async throws -> [ContainerImage] {
         let path = "\(apiBase)/images/json?all=\(all)"
 
         return try await performRequest(path: path, method: "GET")
@@ -59,7 +60,7 @@ extension DockerClient {
     /// Get detailed information about an image
     /// - Parameter imageId: Image ID or name
     /// - Returns: Image details
-    public func inspectImage(id: String) async throws -> Image {
+    public func inspectImage(id: String) async throws -> ContainerImage {
         let path = "\(apiBase)/images/\(id)/json"
 
         return try await performRequest(path: path, method: "GET")
@@ -78,7 +79,8 @@ extension DockerClient {
     ///   - imageId: Image ID or name
     ///   - force: Force removal of the image
     ///   - pruneChildren: Remove untagged parents
-    public func removeImage(id: String, force: Bool = false, pruneChildren: Bool = false) async throws {
+    public func removeImage(id: String, force: Bool = false, pruneChildren: Bool = false)
+        async throws {
         let path = "\(apiBase)/images/\(id)?force=\(force)&prune=\(pruneChildren)"
 
         try await performRequestExpectNoContent(path: path, method: "DELETE")

@@ -9,7 +9,7 @@ import Foundation
 
 // MARK: - Volume Models
 
-struct Volume: Codable, Identifiable {
+struct Volume: Codable, Identifiable, Equatable, Hashable {
     let name: String
     let driver: String
     let mountpoint: String
@@ -34,7 +34,7 @@ struct Volume: Codable, Identifiable {
 
     var id: String { name }
 
-    struct UsageData: Codable {
+    struct UsageData: Codable, Equatable, Hashable {
         let size: Int
         let refCount: Int
 
@@ -79,7 +79,10 @@ extension DockerClient {
     /// - Parameter driver: Volume driver
     /// - Parameter labels: Volume labels
     /// - Returns: Created volume
-    public func createVolume(name: String, driver: String = "local", labels: [String: String]? = nil) async throws -> Volume {
+    public func createVolume(
+        name: String, driver: String = "local", labels: [String: String]? = nil
+    )
+        async throws -> Volume {
         let path = "\(apiBase)/volumes/create"
 
         struct VolumeCreateRequest: Codable {

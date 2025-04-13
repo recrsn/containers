@@ -36,7 +36,7 @@ enum ContainerStatus: String, Codable {
     }
 }
 
-struct Container: Codable, Identifiable {
+struct Container: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let names: [String]
     let image: String
@@ -72,7 +72,7 @@ struct Container: Codable, Identifiable {
         return id.prefix(12).description
     }
 
-    struct Port: Codable {
+    struct Port: Codable, Equatable, Hashable {
         let ip: String?
         let privatePort: Int
         let publicPort: Int?
@@ -105,7 +105,6 @@ struct ContainerCreateRequest: Codable {
         }
     }
 }
-
 
 // MARK: - Container Operations
 
@@ -195,7 +194,8 @@ extension DockerClient {
     ///   - containerId: Container ID or name
     ///   - force: Force removal even if running
     ///   - removeVolumes: Remove associated volumes
-    public func removeContainer(id: String, force: Bool = false, removeVolumes: Bool = false) async throws {
+    public func removeContainer(id: String, force: Bool = false, removeVolumes: Bool = false)
+        async throws {
         let path = "\(apiBase)/containers/\(id)?force=\(force)&v=\(removeVolumes)"
 
         try await performRequestExpectNoContent(path: path, method: "DELETE")

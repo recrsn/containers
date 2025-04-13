@@ -9,7 +9,7 @@ import Foundation
 
 // MARK: - Network Models
 
-struct Network: Codable, Identifiable {
+struct Network: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let name: String
     let driver: String?
@@ -34,12 +34,12 @@ struct Network: Codable, Identifiable {
         case created = "Created"
     }
 
-    struct IPAM: Codable {
+    struct IPAM: Codable, Equatable, Hashable {
         let driver: String?
         let config: [IPAMConfig]?
         let options: [String: String]?
 
-        struct IPAMConfig: Codable {
+        struct IPAMConfig: Codable, Equatable, Hashable {
             let subnet: String?
             let gateway: String?
             let ipRange: String?
@@ -52,7 +52,7 @@ struct Network: Codable, Identifiable {
         }
     }
 
-    struct NetworkContainer: Codable {
+    struct NetworkContainer: Codable, Equatable, Hashable {
         let name: String?
         let endpointId: String
         let macAddress: String?
@@ -94,7 +94,9 @@ extension URL {
         if scheme == "unix", let socketPath = unixSocketPath {
             // For Unix socket URLs, we need to format the URL in a way that AsyncHTTPClient understands
             // The socket path is encoded in the URL itself
-            let socketPathEncoded = socketPath.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? socketPath
+            let socketPathEncoded =
+                socketPath.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed)
+                ?? socketPath
             return "http+unix://\(socketPathEncoded)\(pathComponent)"
         }
 
@@ -102,7 +104,6 @@ extension URL {
         return pathComponent
     }
 }
-
 
 // MARK: - Network Operations
 
@@ -158,13 +159,14 @@ extension DockerClient {
             }
         }
 
-        var ipamConfig: [NetworkCreateRequest.IPAM.IPAMConfig]? = nil
+        var ipamConfig: [NetworkCreateRequest.IPAM.IPAMConfig]?
         if subnet != nil || gateway != nil {
             ipamConfig = [NetworkCreateRequest.IPAM.IPAMConfig(subnet: subnet, gateway: gateway)]
         }
 
-        let ipam = ipamConfig != nil ?
-            NetworkCreateRequest.IPAM(driver: "default", config: ipamConfig) : nil
+        let ipam =
+            ipamConfig != nil
+            ? NetworkCreateRequest.IPAM(driver: "default", config: ipamConfig) : nil
 
         let request = NetworkCreateRequest(
             name: name,
@@ -211,10 +213,11 @@ extension DockerClient {
             }
         }
 
-        let ipamConfig = ipv4Address != nil ?
-            NetworkConnectRequest.EndpointConfig.IPAMConfig(ipv4Address: ipv4Address) : nil
-        let endpointConfig = ipamConfig != nil ?
-            NetworkConnectRequest.EndpointConfig(ipamConfig: ipamConfig) : nil
+        let ipamConfig =
+            ipv4Address != nil
+            ? NetworkConnectRequest.EndpointConfig.IPAMConfig(ipv4Address: ipv4Address) : nil
+        let endpointConfig =
+            ipamConfig != nil ? NetworkConnectRequest.EndpointConfig(ipamConfig: ipamConfig) : nil
 
         let request = NetworkConnectRequest(
             container: containerId,

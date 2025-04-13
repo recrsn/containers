@@ -5,13 +5,14 @@
 //  Created by Amitosh Swain Mahapatra on 02/02/25.
 //
 
-import Foundation
 import AsyncHTTPClient
+import Foundation
 import NIO
-import NIOHTTP1
 import NIOCore
-import NIOPosix
 import NIOFoundationCompat
+import NIOHTTP1
+import NIOPosix
+import os.log
 
 // MARK: - Error Types
 
@@ -22,9 +23,52 @@ enum DockerError: Error {
     case invalidURL
 }
 
-// MARKL - Docker Client
+// MARK: - Docker Client Protocol
 
-final class DockerClient: Sendable {
+protocol DockerClientProtocol: Sendable {
+    // System Operations
+    func info() async throws -> DockerInfo
+
+    // Container Operations
+    func listContainers(all: Bool) async throws -> [Container]
+    func inspectContainer(id: String) async throws -> Container
+    func createContainer(config: ContainerCreateRequest) async throws -> String
+    func startContainer(id: String) async throws
+    func stopContainer(id: String, timeout: Int) async throws
+    func restartContainer(id: String, timeout: Int) async throws
+    func pauseContainer(id: String) async throws
+    func unpauseContainer(id: String) async throws
+    func removeContainer(id: String, force: Bool, removeVolumes: Bool) async throws
+
+    // Image Operations
+    func listImages(all: Bool) async throws -> [ContainerImage]
+    func inspectImage(id: String) async throws -> ContainerImage
+    func pullImage(name: String) async throws
+    func removeImage(id: String, force: Bool, pruneChildren: Bool) async throws
+
+    // Network Operations
+    func listNetworks() async throws -> [Network]
+    func inspectNetwork(id: String) async throws -> Network
+    func createNetwork(
+        name: String, driver: String, subnet: String?, gateway: String?, labels: [String: String]?
+    ) async throws -> String
+    func connectContainerToNetwork(networkId: String, containerId: String, ipv4Address: String?)
+        async throws
+    func disconnectContainerFromNetwork(networkId: String, containerId: String, force: Bool)
+        async throws
+    func removeNetwork(id: String) async throws
+
+    // Volume Operations
+    func listVolumes() async throws -> [Volume]
+    func inspectVolume(name: String) async throws -> Volume
+    func createVolume(name: String, driver: String, labels: [String: String]?) async throws
+        -> Volume
+    func removeVolume(name: String, force: Bool) async throws
+}
+
+// MARK: - Docker Client Implementation
+
+final class DockerClient: DockerClientProtocol {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
@@ -44,7 +88,8 @@ final class DockerClient: Sendable {
 
         // Create HTTP client with Unix socket configuration
         var configuration = HTTPClient.Configuration()
-        configuration.timeout = HTTPClient.Configuration.Timeout(connect: .seconds(5), read: .seconds(10), write: .seconds(10))
+        configuration.timeout = HTTPClient.Configuration.Timeout(
+            connect: .seconds(5), read: .seconds(10), write: .seconds(10))
 
         self.httpClient = HTTPClient(
             configuration: configuration
@@ -55,11 +100,19 @@ final class DockerClient: Sendable {
         try? httpClient.syncShutdown()
     }
 
+    // MARK: - System Operations
+
+    func info() async throws -> DockerInfo {
+        return try await performRequest(path: "\(apiBase)/info", method: "GET")
+    }
+
     // MARK: - Helper Methods
 
-    func performRequest<T: Decodable>(path: String, method: String, body: Encodable? = nil) async throws -> T {
+    func performRequest<T: Decodable>(path: String, method: String, body: Encodable? = nil)
+        async throws -> T {
         // Format URL for Unix socket connection
-        let unixSocketURL = "http+unix://\(socketPath.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? socketPath)\(path)"
+        let unixSocketURL =
+            "http+unix://\(socketPath.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? socketPath)\(path)"
 
         var request = HTTPClientRequest(url: unixSocketURL)
         request.method = .init(rawValue: method)
@@ -86,21 +139,25 @@ final class DockerClient: Sendable {
                 return try decoder.decode(T.self, from: body)
             } catch {
                 let bodyString = String(data: body, encoding: .utf8)
-                print("Response body: \(String(describing: bodyString))")
-                print("Decoding error: \(error)")
-                throw DockerError.decodingError("Failed to decode response: \(error.localizedDescription)")
+                Logger.shared.error("Decoding error: \(error)")
+                Logger.shared.debug("Response body: \(String(describing: bodyString))")
+                throw DockerError.decodingError(
+                    "Failed to decode response: \(error.localizedDescription)")
             }
         } catch let error as DockerError {
+            Logger.shared.error(error, context: "Docker API")
             throw error
         } catch {
-            print("Network error: \(error)")
+            Logger.shared.error("Network error: \(error)")
             throw DockerError.networkError(error)
         }
     }
 
-    func performRequestExpectNoContent(path: String, method: String, body: Encodable? = nil) async throws {
+    func performRequestExpectNoContent(path: String, method: String, body: Encodable? = nil)
+        async throws {
         // Format URL for Unix socket connection
-        let unixSocketURL = "http+unix://\(socketPath.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? socketPath)\(path)"
+        let unixSocketURL =
+            "http+unix://\(socketPath.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? socketPath)\(path)"
 
         var request = HTTPClientRequest(url: unixSocketURL)
         request.method = .init(rawValue: method)
@@ -121,9 +178,10 @@ final class DockerClient: Sendable {
                 throw DockerError.apiError(statusCode: response.status, message: errorMessage)
             }
         } catch let error as DockerError {
+            Logger.shared.error(error, context: "Docker API")
             throw error
         } catch {
-            print("Network error: \(error)")
+            Logger.shared.error("Network error: \(error)")
             throw DockerError.networkError(error)
         }
     }
