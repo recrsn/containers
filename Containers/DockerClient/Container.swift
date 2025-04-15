@@ -106,6 +106,16 @@ struct ContainerCreateRequest: Codable {
     }
 }
 
+struct ContainerCreateResponse: Codable {
+    let id: String?
+    let warnings: [String]?
+    
+    enum CodingKeys: String, CodingKey {
+        case id = "Id"
+        case warnings = "Warnings"
+    }
+}
+
 // MARK: - Container Operations
 
 extension DockerClient {
@@ -129,22 +139,16 @@ extension DockerClient {
 
     /// Create a new container
     /// - Parameter config: Container configuration
-    /// - Returns: Created container ID
-    public func createContainer(config: ContainerCreateRequest) async throws -> String {
+    /// - Returns: ContainerCreateResponse with ID and warnings
+    public func createContainer(config: ContainerCreateRequest) async throws -> ContainerCreateResponse {
         let path = "\(apiBase)/containers/create"
         let query = config.name != nil ? "?name=\(config.name!)" : ""
 
-        let response: [String: String] = try await performRequest(
+        return try await performRequest(
             path: path + query,
             method: "POST",
             body: config
         )
-
-        guard let id = response["Id"] else {
-            throw DockerError.decodingError("Missing container ID in response")
-        }
-
-        return id
     }
 
     /// Start a container

@@ -36,7 +36,16 @@ final class DockerContext {
     var containers: [Container] = []
 
     var imageLoading: Bool = false
-    var images: [ContainerImage] = []
+    
+    var downloadedImages: [ContainerImage] = []
+    var pullingImages: [String: ContainerImage] = [:]
+    
+    var images: [ContainerImage] {
+        // Combine and sort both pulling and downloaded images by creation time (newest first)
+        let pullingArray = Array(pullingImages.values).sorted(by: { $0.created > $1.created })
+        let sortedDownloaded = downloadedImages.sorted(by: { $0.created > $1.created })
+        return pullingArray + sortedDownloaded
+    }
 
     var networkLoading: Bool = false
     var networks: [Network] = []
@@ -97,7 +106,7 @@ final class DockerContext {
         defer { imageLoading = false }
 
         do {
-            images = try await client.listImages(all: false)
+            downloadedImages = try await client.listImages(all: false)
         } catch {
             Logger.shared.error(error, context: "Failed to load images")
             connectionError = error
@@ -173,13 +182,38 @@ final class DockerContext {
 
     // MARK: - Container Operations
 
-    func createContainer(config: CreateContainerConfig) async throws -> String {
+    func createContainer(config: CreateContainerConfig) async throws -> ContainerCreateResponse {
         containerLoading = true
         defer { containerLoading = false }
 
         do {
-            return try await client.createContainer(config: config.toCreateRequest())
+            let request = config.toCreateRequest()
+            Logger.shared.debug("Creating container with image: \(request.image)")
+            
+            // Log more details about the request
+            if let name = request.name {
+                Logger.shared.debug("Container name: \(name)")
+            }
+            if let envVars = request.env, !envVars.isEmpty {
+                Logger.shared.debug("Environment variables: \(envVars.joined(separator: ", "))")
+            }
+            if let portBindings = request.hostConfig?.portBindings, !portBindings.isEmpty {
+                let bindingInfo = portBindings.map { key, value in
+                    return "\(key): \(value.map { "\($0.hostPort ?? "nil")" }.joined(separator: ", "))"
+                }.joined(separator: "; ")
+                Logger.shared.debug("Port bindings: \(bindingInfo)")
+            }
+            
+            let response = try await client.createContainer(config: request)
+            
+            // Log any warnings from the Docker API
+            if let warnings = response.warnings, !warnings.isEmpty {
+                Logger.shared.warning("Container created with warnings: \(warnings.joined(separator: ", "))")
+            }
+            
+            return response
         } catch {
+            // Log error with context - DockerError will now have a much better description
             Logger.shared.error(error, context: "Failed to create container")
             connectionError = error
             throw error
@@ -286,10 +320,62 @@ final class DockerContext {
         guard isConnected else { return }
 
         imageLoading = true
-        defer { imageLoading = false }
+        
+        // Create a new ContainerImage instance for the image being pulled
+        var pullingImage = ContainerImage(
+            id: "pulling_\(name)",  // Temporary ID
+            parentId: "",
+            repoTags: [name],
+            repoDigests: nil,
+            created: Int(Date().timeIntervalSince1970),
+            size: 0,
+            sharedSize: 0,
+            labels: nil,
+            containers: 0
+        )
+        
+        // Mark this as a pulling image
+        pullingImage.isPulling = true
+        
+        // Add to the pulling images dictionary
+        pullingImages[name] = pullingImage
+        
+        defer { 
+            imageLoading = false
+            // Remove the image from pullingImages when done
+            pullingImages.removeValue(forKey: name)
+        }
 
         do {
-            try await client.pullImage(name: name)
+            let stream = try client.pullImage(name: name)
+            
+            for try await progress in stream {
+                if let id = progress.id {
+                    // Add this layer to the set of all layers
+                    pullingImages[name]?.allLayers.insert(id)
+                    
+                    // Always update the status for this layer
+                    pullingImages[name]?.layerStatus[id] = progress.status
+                    
+                    // Check if this is a layer completion status
+                    if progress.status.contains("Download complete") || 
+                       progress.status.contains("Pull complete") ||
+                       progress.status.contains("Already exists") {
+                        // Mark this layer as completed
+                        pullingImages[name]?.completedLayers.insert(id)
+                        // Remove from in-progress since it's done
+                        pullingImages[name]?.layerProgress.removeValue(forKey: id)
+                    } else if progress.progressDetail?.total != nil {
+                        // This is a layer in progress
+                        pullingImages[name]?.layerProgress[id] = progress.progressPercent
+                    }
+                    
+                    // Log the progress for debugging
+                    Logger.shared.debug("Image: \(name), Layer: \(id), Status: \(progress.status), Progress: \(String(describing: progress.progress))")
+                }
+            }
+            
+            // Once complete, refresh the images list
             try await loadImages()
         } catch {
             Logger.shared.error(error, context: "Failed to pull image \(name)")
@@ -387,7 +473,7 @@ extension DockerContext {
         context.isConnected = true
         context.systemInfo = PreviewData.dockerInfo
         context.containers = [PreviewData.container]
-        context.images = [PreviewData.image]
+        context.downloadedImages = [PreviewData.image]
         context.networks = [PreviewData.network]
         context.volumes = [PreviewData.volume]
         return context

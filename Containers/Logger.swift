@@ -24,7 +24,7 @@ final class _Logger {
     private let osLog: OSLog
     private let fileURL: URL
     private let dateFormatter: DateFormatter
-    private let logQueue = DispatchQueue(label: "com.amitosh.containers.logger", qos: .utility)
+    private let logQueue = DispatchQueue(label: "com.inputforge.containers.logger", qos: .utility)
 
     var minimumLogLevel: LogLevel = .info
 

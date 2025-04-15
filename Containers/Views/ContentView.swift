@@ -38,6 +38,8 @@ struct ContentView: View {
         }
     }
 
+    @State private var refreshTimer: Timer?
+    
     var body: some View {
         NavigationSplitView {
             sidebarView
@@ -90,6 +92,27 @@ struct ContentView: View {
                     showError = true
                 }
             }
+            
+            refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+                Task {
+                    if await docker.isConnected {
+                        do {
+                            try await docker.refreshAll()
+                        } catch {
+                            Logger.shared.error(error, context: "Failed to refresh Docker objects")
+                            
+                            DispatchQueue.main.async {
+                                errorMessage = "Failed to refresh Docker objects: \(error.localizedDescription)"
+                                showError = true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .onDisappear {
+            refreshTimer?.invalidate()
+            refreshTimer = nil
         }
         .task {
             if docker.isConnected {

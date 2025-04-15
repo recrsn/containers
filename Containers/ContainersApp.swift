@@ -14,7 +14,7 @@ struct ContainersApp: App {
 
     init() {
         // Set minimum log level
-        Logger.shared.minimumLogLevel = .info
+        Logger.shared.minimumLogLevel = .debug
 
         // Log app startup
         Logger.shared.info("Containers app started")
@@ -39,7 +39,7 @@ struct ContainersApp: App {
 
         // Log system information
         let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
-        Logger.shared.info("Running on \(osVersion)")
+        Logger.shared.info("Running on macOS \(osVersion)")
     }
 
     var body: some Scene {

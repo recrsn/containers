@@ -36,6 +36,24 @@ struct DockerInfoView: View {
                 InfoCard(title: "Container Statistics", systemName: "square.3.stack.3d") {
                     ContainerStatsView(info: info)
                 }
+                
+                // Warnings card
+                if let warnings = info.warnings, !warnings.isEmpty {
+                    InfoCard(title: "Warnings", systemName: "exclamationmark.triangle") {
+                        ForEach(warnings, id: \.self) { warning in
+                            HStack(alignment: .top) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                    .padding(.top, 2)
+
+                                Text(warning)
+                                    .foregroundStyle(.orange)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
 
                 // More details section
                 InfoCard(title: "Advanced Details", systemName: "gear.circle") {
@@ -46,25 +64,6 @@ struct DockerInfoView: View {
                         Label("All Configuration Properties", systemImage: "list.bullet.indent")
                             .font(.headline)
                     }
-                }
-
-                // Warnings card
-                if let warnings = info.warnings, !warnings.isEmpty {
-                    InfoCard(title: "Warnings", systemName: "exclamationmark.triangle") {
-                        ForEach(warnings, id: \.self) { warning in
-                            HStack(alignment: .top) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.red)
-                                    .padding(.top, 2)
-
-                                Text(warning)
-                                    .foregroundStyle(.red)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-                    .background(Color.red.opacity(0.1))
                 }
 
                 Spacer()

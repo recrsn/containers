@@ -51,7 +51,7 @@ actor PreviewDockerClient: DockerClientProtocol {
         return container
     }
 
-    func createContainer(config: ContainerCreateRequest) async throws -> String {
+    func createContainer(config: ContainerCreateRequest) async throws -> ContainerCreateResponse {
         let id = "mock_\(UUID().uuidString.prefix(12))"
 
         let names = [config.name.map { "/\($0)" } ?? "/mock_container"].compactMap { $0 }
@@ -72,7 +72,11 @@ actor PreviewDockerClient: DockerClientProtocol {
         )
 
         containers.append(newContainer)
-        return id
+        
+        // Sometimes include warnings to test that functionality
+        let warnings: [String]? = Bool.random() ? ["Mock warning: This is a test warning"] : nil
+        
+        return ContainerCreateResponse(id: id, warnings: warnings)
     }
 
     func startContainer(id: String) async throws {
@@ -220,22 +224,90 @@ actor PreviewDockerClient: DockerClientProtocol {
         }
         return image
     }
+    
+    private func addImage(_ image: ContainerImage) async {
+        self.images.append(image)
+    }
 
-    func pullImage(name: String) async throws {
-        // Simulate image pull by creating a new image if it doesn't exist
-        if !images.contains(where: { $0.repoTags?.contains(name) == true }) {
-            let newImage = ContainerImage(
-                id: "sha256:\(UUID().uuidString)",
-                parentId: "",
-                repoTags: [name],
-                repoDigests: ["mock@sha256:\(UUID().uuidString)"],
-                created: Int(Date().timeIntervalSince1970),
-                size: 150_000_000,
-                sharedSize: 0,
-                labels: ["maintainer": "Mock Maintainer"],
-                containers: 0
-            )
-            images.append(newImage)
+    nonisolated func pullImage(name: String) -> AsyncThrowingStream<ImagePullProgress, Error> {
+        return AsyncThrowingStream { continuation in
+            Task {
+                // Simulate progress events for the pull operation
+                let layerCount = Int.random(in: 3...5)
+                let layers = (0..<layerCount).map { _ in UUID().uuidString.prefix(12).description }
+                
+                // Send initial status for each layer
+                for layer in layers {
+                    let status = ImagePullProgress(
+                        status: "Pulling from \(name)",
+                        progressDetail: nil,
+                        id: layer,
+                        progress: nil
+                    )
+                    continuation.yield(status)
+                    try await Task.sleep(nanoseconds: 200_000_000) // 200ms delay
+                }
+                
+                // Send progress updates for each layer
+                for progress in stride(from: 0.1, through: 1.0, by: 0.1) {
+                    for layer in layers {
+                        let total = Int.random(in: 5_000_000...50_000_000)
+                        let current = Int(Double(total) * progress)
+                        
+                        let status = ImagePullProgress(
+                            status: "Downloading",
+                            progressDetail: ImagePullProgress.ProgressDetail(
+                                current: current,
+                                total: total
+                            ),
+                            id: layer,
+                            progress: "[\(Int(progress * 100))%]"
+                        )
+                        continuation.yield(status)
+                    }
+                    try await Task.sleep(nanoseconds: 300_000_000) // 300ms delay
+                }
+                
+                // Final status updates
+                for layer in layers {
+                    let status = ImagePullProgress(
+                        status: "Download complete",
+                        progressDetail: nil,
+                        id: layer,
+                        progress: nil
+                    )
+                    continuation.yield(status)
+                    try await Task.sleep(nanoseconds: 100_000_000) // 100ms delay
+                }
+                
+                // Create the image in our mock database
+                if await !self.images.contains(where: { $0.repoTags?.contains(name) == true }) {
+                    let newImage = ContainerImage(
+                        id: "sha256:\(UUID().uuidString)",
+                        parentId: "",
+                        repoTags: [name],
+                        repoDigests: ["mock@sha256:\(UUID().uuidString)"],
+                        created: Int(Date().timeIntervalSince1970),
+                        size: 150_000_000,
+                        sharedSize: 0,
+                        labels: ["maintainer": "Mock Maintainer"],
+                        containers: 0
+                    )
+                    await self.addImage(newImage)
+                }
+                
+                // Final complete status
+                let finalStatus = ImagePullProgress(
+                    status: "Pull complete",
+                    progressDetail: nil,
+                    id: nil,
+                    progress: nil
+                )
+                continuation.yield(finalStatus)
+                
+                // Finish the stream
+                continuation.finish()
+            }
         }
     }
 

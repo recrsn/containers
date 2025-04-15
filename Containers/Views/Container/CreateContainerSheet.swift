@@ -13,6 +13,9 @@ struct CreateContainerSheet: View {
     @Environment(DockerContext.self) private var docker
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var isCreating = false
+    @State private var successMessage: String?
+    @State private var showSuccess = false
 
     var body: some View {
         NavigationStack {
@@ -48,6 +51,16 @@ struct CreateContainerSheet: View {
                 Section {
                     Toggle("Start container immediately", isOn: $config.startImmediately)
                 }
+                
+                if isCreating {
+                    Section {
+                        HStack {
+                            Spacer()
+                            ProgressView("Creating container...")
+                            Spacer()
+                        }
+                    }
+                }
             }
             .navigationTitle("Create Container")
             .toolbar {
@@ -55,41 +68,93 @@ struct CreateContainerSheet: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .disabled(isCreating)
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
+                    Button(isCreating ? "Creating..." : "Create") {
                         createContainer()
                     }
-                    .disabled(config.image.isEmpty)
+                    .disabled(config.image.isEmpty || isCreating)
                 }
             }
         }
         .frame(minWidth: 400, minHeight: 500)
-        .alert("Error", isPresented: $showError) {
+        .alert("Container Creation Failed", isPresented: $showError) {
             Button("OK") {}
         } message: {
             Text(errorMessage ?? "An unknown error occurred")
+                .multilineTextAlignment(.leading)
         }
+        .alert("Success", isPresented: $showSuccess) {
+            Button("OK") {
+                dismiss()
+            }
+        } message: {
+            Text(successMessage ?? "Container created successfully")
+                .multilineTextAlignment(.leading)
+        }
+        .disabled(isCreating)
     }
 
     private func createContainer() {
+        isCreating = true
+        
         Task {
             do {
                 // Create container
-                let containerId = try await docker.createContainer(config: config)
+                let response = try await docker.createContainer(config: config)
+                
+                guard let containerId = response.id else {
+                    throw DockerError.decodingError("Missing container ID in response")
+                }
+                
+                let containerName = config.name.isEmpty ? String(containerId.prefix(12)) : config.name
+                
+                // Display warnings if any
+                if let warnings = response.warnings, !warnings.isEmpty {
+                    let warningText = warnings.joined(separator: "\n- ")
+                    successMessage = "Container '\(containerName)' created with warnings:\n- \(warningText)"
+                    if config.startImmediately {
+                        successMessage! += "\n\nContainer will be started."
+                    }
+                }
+                else {
+                    successMessage = config.startImmediately 
+                        ? "Container '\(containerName)' created successfully" 
+                        : "Container '\(containerName)' created successfully"
+                }
 
                 // Start container if requested
                 if config.startImmediately {
                     try await docker.startContainer(id: containerId)
+                    if response.warnings?.isEmpty ?? true {
+                        successMessage = "Container '\(containerName)' created and started successfully"
+                    }
                 }
 
                 // Reset form and refresh containers
                 try await docker.loadContainers()
-                dismiss()
+                
+                isCreating = false
+                showSuccess = true
             } catch {
+                // Log the error with context
                 Logger.shared.error(error, context: "Failed to create container")
-                errorMessage = "Failed to create container: \(error.localizedDescription)"
+                
+                // Use error.localizedDescription which will now use our custom descriptions
+                // for DockerError through the LocalizedError protocol
+                errorMessage = error.localizedDescription
+                
+                // Add additional debug logging for non-Docker errors
+                if !(error is DockerError), let nsError = error as NSError? {
+                    Logger.shared.error("Error domain: \(nsError.domain), code: \(nsError.code)")
+                    if let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+                        Logger.shared.error("Underlying error: \(underlyingError)")
+                    }
+                }
+                
+                isCreating = false
                 showError = true
             }
         }
@@ -110,6 +175,9 @@ extension CreateContainerConfig {
                 if parts.count == 2 {
                     let hostPort = String(parts[0].trimmingCharacters(in: .whitespaces))
                     let containerPort = String(parts[1].trimmingCharacters(in: .whitespaces))
+                    
+                    // Log port binding for debugging
+                    Logger.shared.debug("Processing port mapping: host \(hostPort) -> container \(containerPort)")
 
                     // Create port binding
                     let binding = ContainerCreateRequest.HostConfig.PortBinding(
@@ -117,8 +185,15 @@ extension CreateContainerConfig {
                         hostPort: hostPort
                     )
 
-                    // Add to bindings
-                    portBindings?["\(containerPort)/tcp"] = [binding]
+                    // Add to bindings - ports need to be in format "port/tcp" or "port/udp"
+                    let containerPortWithProtocol = containerPort.contains("/") ? containerPort : "\(containerPort)/tcp"
+                    portBindings?[containerPortWithProtocol] = [binding]
+                    
+                    // Log the final binding format being used
+                    Logger.shared.debug("Added port binding: \(containerPortWithProtocol) -> \(hostPort)")
+                } else {
+                    // Log warning for invalid port format
+                    Logger.shared.warning("Invalid port mapping format: \(portMapping), expected HOST:CONTAINER")
                 }
             }
         }
